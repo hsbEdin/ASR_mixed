@@ -16,3 +16,6 @@ This recipe was developed by Xingyu Na (Microsoft Corporation) and Hui Bu (AISHE
 4. Features are extracted in an online fashion.
 5. A Chain model ready for **online ASR** is trained, prepared and evaluated.
 6. Data preparation scripts are copied from existing recipes, so it is straightforward for any user to **expand the corpora**.
+
+##Run
+Before run the file "test_run.sh"(ignore the run.sh), you need to build your dataset file category, for example: "mnt/data/openslr/500hourdata".
