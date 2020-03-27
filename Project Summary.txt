@@ -1,0 +1,108 @@
+ASR项目总结：
+
+语音识别流程：
+输入的语音数据是wav格式的语音，经过前端处理之后的得到的分段语音数据送入特征提取模块（mfcc），进行声学特征提取。最后解码模块对提取的特征数据进行解码，解码过程中利用发音字典，声学模型，语言模型等信息构建WFST搜索空间，在搜索空间内寻找匹配概率最大的最优路径，便得到最优的识别结果。
+kaldi先准备数据，将所需要的词典下载到local/dict中，并准备相关映射文件：wav.scp，spk2utt，utt2spk，text。
+接着准备语言模型，根据词典和数据集的标注文本训练语言模型（local/train_lms），包括将音素序列映射成词语序列的L.fst（prepare_lang），三元文法语言模型G.fst，以及编译LG.fst
+然后得到语音的mfcc特征（steps/make_mfcc_pitch_online）
+再训练GMM-HMM模型（steps/train_mono）
+这样就得到了：
+1. G：语言模型，输入输出类型相同，实际是一个WFSA（acceptor接受机），为了方便与其它三个WFST进行操作，将其视为一个输入输出相同的WFST。
+2. L：发音词典，输入：monophone，输出：词;
+3. C：上下文相关，输入：triphone（上下文相关），输出：monophnoe;
+4. H：HMM声学模型
+通过算法组合它们得到了HCLG.fst。
+解码网络（steps/decode）使用HCLG.fst，过程中使用 Lattice 来保存识别的候选序列，通过遍历得到得分最靠前的多条候选路径，即 N-best，即为输出文本。Lattice 本质是一个有向无环图( directed acyclic graph )。 图上的每个节点代表一个词的结束时间点，每条边代表一个可能的词，以及该词发生的声学得分和语言模型得分。
+Decoding是在HCLG上做动态规划的过程-->生成lattice，再找best path（也可以直接找1-best，方法很多）。HCLG相当于地图，lattice相当于你可能会走的所有路线的集合（同样是个有向图）。对一个训练好的系统来说，HCLG是不变的，但lattice是针对每一个不同的testing句子的，每次都不一样。beam search的引入是因为，如果考虑所有的可能路线会太慢，内存也放不下（等其他类似原因），所以设置一个beam，中途去掉一些不太可能的路线。注意这个过程是有损的（可接受），是用空间和准确度换取时间（效率）的方法。
+
+脚本介绍：
+
+　　run.sh脚本一开始导入了两个脚本，一个是cmd.sh，一个是path.sh。在path.sh中，要注意将原有的export的路径修改为自己虚拟环境的路径；在cmd.sh中，需要把queuel.pl改成run.pl，对于 kaldi 这套系统而言，queue.pl 主要对 SUN 公司的 GridEngine 相对而言友好一些，对于单机执行，通常在 cmd.sh 中配置为 run.pl 即单机多进程执行。
+　　另外，在run.sh脚本开头有一个stage=0,修改这个参数可以跳过之前已经训练好的阶段，例如下载数据集
+1.stage0-1
+　　这里是数据准备阶段，我们的数据集是500hour的中文+200hour的中英文混合，因为已经下好并解压了，所以我直接在脚本中创建相应的数据集文件夹，分别是500hour_1,500hour_2和200hour，这里对500hour数据集进行了切分，按照大小均匀切成两份，各30G的音频数据，在后面的训练阶段会分别用到它们。
+　　因为我们的数据集只有train和dev，所以在脚本的数据准备上，dev直接用作test数据集，并创建了对应的文件夹存放。注意在run.sh脚本中，所有的”dev”都需要改成”test”。
+　　Stage1用到了一个data_prep脚本对数据集分别处理，由于ASRU数据基本没有标点符号，且在音频对应的文本上，开头和结尾有标识符，所以需要专门在数据清洗阶段进行处理，并且用Jieba进行分词。最后得到训练阶段需要的中间文件，其中音频对应的英文文本均处理成大写。
+　　ASRU数据集与源代码中magicdata数据集相似，在改写数据集接口时可以参考magicdata的脚本。
+中间文件介绍：spk2utt 是说话人id（记作spkid）和说话人语音名称（uttid）的对应关系；wav.scp 是语音名称uttid和其完整路径的对应，也是每行一个音频；text文件记录了每个发音id与其对应的文本。
+
+2.Stage2
+ 	在数据准备阶段需要准备标注数据的发音，首先是把训练数据和测试数据对应的标注（text）合成一个文件，然后就是根据准备好的发音字典对之前的标注数据进行处理，最后，根据这些生成文件，用prepare_dict脚本来生成字典，音素等文件，放到字典文件夹下。字典文件夹的文件如下：
+1) words.txt   为训练数据和测试数据分词之后，和起来的所有去重之后的词
+2) lexicon.txt  根据sum_dict.lex，生成word对应的发音字典文件，对应格式为 word phone phone phone...
+3) silence_phones.txt  静音音素
+4)optional_silence.txt  一个单独的音素，用来作为字典中默认的静音音素
+5)phones.txt  根据lexicon生成的所有的音素集合
+6)nonsilence_phones.txt  非静音音素
+7)extra_questions.txt   用于构建决策树的问题集，由静音音素和非静音音素生成
+
+
+3.stage3-4
+tools/kaldi_lm/train_lm.sh中，heldout_sent参数需要根据数据集的实际大小而变化。源码中默认的语料文本是10k句，对于语料较少的情况heldout_sent参数值设定为语料语句总数的1/10。
+
+
+略
+4.stage5-6
+计算mfcc和pitch特征，提取的特征存入feats.scp中
+5.stage7-9
+　　Mono是单音素训练，Tri1是三音素训练，stage7用到的数据集是200hour的中英文混合数据集。Stage8过程与7相同，但是用到的训练数据集是200hour中英文混合+500_1的中文数据集。Stage9是对7，8的结果解码。
+　　运行单音素训练用到的脚本是train_mono.sh，步骤为：初始化-生成训练图-对标签进行初始化-估计统计模型所需的统计了-参数重估，估计新的模型-迭代训练。其中，训练图的输入是GMM的标识符序列，输出是词的标识符序列。标签对齐是在HCLG+GMM中对特征进行维特比搜索，得到最优结果，即Alignment（对齐）；HCLG+GMM的输入是特征序列，输出是词的标识符序列。
+　　align_si.sh对特征进行若干变换，调整模型的静音音素权重，根据词-词标识符映射表（words.txt），将标注转换为词标识符的序列。
+　　train_deltas.sh是三音素训练脚本，过程与mono训练类似，但是基于mono的结果，由生成的单音素模型的对齐结果对三音素参数统计，用于生成决策树，之后将单音素对其文件中的元素替换为决策树的叶子，来生成训练图。
+　　
+　　这里有个参数需要注意，nj代表并行的Jobs数，在运行前需要检查数据集是否能分割成nj份，显存是否足够支持设定的nj线程。
+6.stage10-11
+对前面stage生成的三音素结果反复训练并进行测试。
+
+7.stage12-13
+这里是用lda-mllt训练脚本，非说话人自适应，mllt的作用是减少协方差矩阵对角化的损失，LDA+MLLT指的是在计算MFCC后对特征进行的变换：首先对特征进行扩帧，使用LDA降维（默认降低到40），然后经过多次迭代轮数估计一个对角变换（又称为MLLT或CTC）。
+LDA_MLLT三音素HMM的训练流程图：
+
+8.stage14-15
+train_sat.sh是说话人自适应模型，声学特征变化fmllr的训练脚本。align_fmllr.sh对齐，在原有对齐步骤后面多了3个stage。
+所谓说话人自适应技术是利用特定说话人数据对说话人无关(Speaker Independent,SI)的码本进行改造，其目的是得到说话人自适应(Speaker Adapted, SA)的码本来提升识别性能。实质是利用自适应数据调整SI码本以符合当前说话人特性。
+针对特定的说话人，其码本可以用SI码本经过线性变换后的SA码本表示，fMLLR码本自适应的目的就是估算变换矩阵从而更新SA码本。
+
+　　
+9.stage16对之前的中间文件进行清理
+10.Stage17是收集GMM的结果
+
+
+最后的部分是chain_tdnn网络的训练：
+tdnn原始文献：
+Waibel A, Hanazawa T, Hinton G, et al. Phoneme recognition using time-delay neural networks[J] 
+
+1.chain-tdnn的介绍
+　　卷积神经网络（CNN）是受语音信号处理中时延神经网络（TDNN）影响而发明的。
+设计一个包含多帧的神经网络，如下图我们考虑延时为2，则连续的3帧都会被考虑。其中隐含层起到特征抽取的作用，输入层每一个矩形内共有13个小黑点，代表该帧的13维MFCC特征。假设有10个隐含层，那么连接的权重数目为3*13*10=390。
+
+　　
+为了结构紧凑显示，我们将其重绘：
+
+这两张图是等价的。其中每条彩色线代表13*10=130个权重值。三条彩色线为390个权重。也有资料称之为滤波器。
+好，如果时间滚滚向前，我们不断地对语音帧使用滤波器，我们可以得到新图：
+
+其中绿色的线权值相同，红色的线权值相同，蓝色的线权值相同。相当于把滤波器延时。输入与隐层共390个权值变量待确定。
+每个隐层矩形内包含10个节点，那么每条棕色的线包含10个权值，假设输出层与隐层的延时为4，则接收5个隐层矩形内的数据，那么隐层与输出层合计权值为10*5*3=150。权值非常少，所以便于训练。
+tdnn的训练方法：
+（1）和传统的反向传播算法一样。
+（2）TDNN有快速算法，有兴趣的读者可以搜索。
+tdnn的优点总结：
+（1）网络是多层的，每层对特征有较强的抽象能力。
+（2）有能力表达语音特征在时间上的关系。
+（3）具有时间不变性。
+（4）学习过程中不要求对所学的标记进行精确的时间定为。
+（5）通过共享权值，方便学习。
+
+kaldi原始框架中使用的脚本是local/chain/run_cnn_tdnn.sh，我们使用local/chain/tunning/run_cnn_tdnn_1b.sh，它在原来的基础上引入了SpecAugment数据增强方法，并且移除了dropout。脚本中有两个重要参数需要修改，一个是num-jobs-initial，还一个是num-jobs-final，如果只有单个gpu ，需要将num-jobs-initial和num-jobs-final都设为1，epochs最好改为原来的2/3。
+run_ivector_common.sh脚本中的nj也需要根据数据集进行调整，原理同之前。
+
+如果想要重新训练run_cnn_tdnn_1b.sh，需要删除以下几个文件：data/train_all_cleaned_sp/feats.scp
+exp/tri4a_cleaned_ali_train_all_cleaned_sp/
+exp/chain_cleaned/tree_sp/final.mdl
+迭代次数可以通过修改train_stage参数来继续之前的迭代数量，同时需要修改--trainer.optimization.initial-effective-lrate参数
+
+
+Chain-TDNN-HMM模型在CPU上训练较慢，所以最好在GPU上训练，并要确保已经编译CUDA。
+Chain-TDNN-HMM模型训练（run_tdnn_1b）需要构造优化的HMM拓扑结构，根据新的拓扑结构重新生成决策树，再配置神经网络。
+Steps/nnet3/chain/train.py脚本用于训练TDNN网络，用utils/mkgraph构建解码图，最后steps/nnet3/decode进行解码。
