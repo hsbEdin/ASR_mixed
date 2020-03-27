@@ -1,0 +1,35 @@
+LHD	DataTang
+DBN	DY2016110027
+SES	G0002
+CMT	*** Speech Label Information
+SRC	T0055G0002S0394.metadata
+DIR	data\category1\G0002\session01\T0055G0002S0394.wav
+CCD	reading
+BEG	
+END	
+REP	
+RED	
+RET	
+CMT	*** Speech Data Coding ***
+SAM	16000
+SNB	2 signed
+SBF	lohi
+SSB	16
+QNT	wav
+NCH	1
+CMT	*** Speaker Information ***
+SCD	G0002
+SEX	Male
+AGE	23
+ACC	
+ACT	
+BIR	Jiang Xi ProvinceJiu Jiang  City
+CMT	*** Recording Conditions ***
+SNQ	
+MIP	
+MIT	Lenovo A820t
+SCC	
+CMT	*** Label File Body ***
+LBD	T0055G0002S0394.txt
+LBR	
+LBO	

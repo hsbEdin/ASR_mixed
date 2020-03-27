@@ -1,0 +1,1 @@
+装尾门时候果真用到了gap和alignment

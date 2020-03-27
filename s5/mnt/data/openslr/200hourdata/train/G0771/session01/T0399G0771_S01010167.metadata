@@ -1,0 +1,37 @@
+LHD	DataTang
+DBN	ZY20171116-11
+SES	G0771
+CMT	*** Label File Body ***
+SRC	T0399G0771_S01010167.wav
+DIR	data/category/G0771/session01
+CCD	reading
+REP	indoor
+RED
+RET
+CMT	***Speech Data Coding***
+SAM	16000
+SNB	2 signed
+SBF	lohi
+SSB	16
+QNT	wav
+NCH	1
+CMT	***Speaker Information***
+SCD	G0771
+SEX	man
+AGE	28
+ACC	he bei province shi jia zhuang city
+ACT	Standard Mandarin(Official Chinese Language)
+BIR	he bei province shi jia zhuang city
+CMT	***Recording Conditions***
+SNQ
+MIP	close
+MIT	Android
+SCC	Quiet
+CMT	***Label File Body***
+LBD	T0399G0771_S01010167.txt
+LBR	0, 3.734125
+LBO	3.734125
+ADL	*** Customized Label Body ***
+SRA
+EMO
+ORS	help，哪个啥叽把我埋了
